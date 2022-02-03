@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [3.9.3](https://github.com/awslabs/fhir-works-on-aws-search-es/compare/v3.9.2...v3.9.3) (2022-02-01)
+
+
+### Bug Fixes
+
+* allow revinclude to return more than 10 resources ([#164](https://github.com/awslabs/fhir-works-on-aws-search-es/issues/164)) ([b1e3a1a](https://github.com/awslabs/fhir-works-on-aws-search-es/commit/b1e3a1aeba2a84b7f5d080ded4024bcb88169c0a))
+
+### [3.9.2](https://github.com/awslabs/fhir-works-on-aws-search-es/compare/v3.9.1...v3.9.2) (2021-12-09)
+
+
+### Bug Fixes
+
+* boolean token search ([#145](https://github.com/awslabs/fhir-works-on-aws-search-es/issues/145)) ([b3379c7](https://github.com/awslabs/fhir-works-on-aws-search-es/commit/b3379c785430809d4223f5fe68dc6731f0070dc2))
+
 ### [3.9.1](https://github.com/awslabs/fhir-works-on-aws-search-es/compare/v3.9.0...v3.9.1) (2021-11-12)
 
 

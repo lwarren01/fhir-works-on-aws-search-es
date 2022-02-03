@@ -4,8 +4,7 @@
  */
 
 import { isEmpty } from 'lodash';
-import { InvalidSearchParameterError, TypeSearchRequest } from 'fhir-works-on-aws-interface';
-import { NON_SEARCHABLE_PARAMETERS } from '../constants';
+import { TypeSearchRequest } from 'fhir-works-on-aws-interface';
 import { CompiledSearchParam, FHIRSearchParametersRegistry, SearchParam } from '../FHIRSearchParametersRegistry';
 import { stringQuery } from './typeQueries/stringQuery';
 import { dateQuery } from './typeQueries/dateQuery';
@@ -13,14 +12,21 @@ import { tokenQuery } from './typeQueries/tokenQuery';
 import { numberQuery } from './typeQueries/numberQuery';
 import { quantityQuery } from './typeQueries/quantityQuery';
 import { referenceQuery } from './typeQueries/referenceQuery';
-import getOrSearchValues from './searchOR';
-import { parseSearchModifiers, normalizeQueryParams, isChainedParameter } from './util';
 import { uriQuery } from './typeQueries/uriQuery';
+import {
+    DateSearchValue,
+    NumberSearchValue,
+    ParsedFhirQueryParams,
+    parseQuery,
+    QuantitySearchValue,
+    TokenSearchValue,
+} from '../FhirQueryParser';
+import { ReferenceSearchValue } from '../FhirQueryParser/typeParsers/referenceParser';
 
 function typeQueryWithConditions(
     searchParam: SearchParam,
     compiledSearchParam: CompiledSearchParam,
-    searchValue: string,
+    searchValue: unknown,
     useKeywordSubFields: boolean,
     baseUrl: string,
     modifier?: string,
@@ -28,24 +34,29 @@ function typeQueryWithConditions(
     let typeQuery: any;
     switch (searchParam.type) {
         case 'string':
-            typeQuery = stringQuery(compiledSearchParam, searchValue, modifier);
+            typeQuery = stringQuery(compiledSearchParam, searchValue as string, modifier);
             break;
         case 'date':
-            typeQuery = dateQuery(compiledSearchParam, searchValue, modifier);
+            typeQuery = dateQuery(compiledSearchParam, searchValue as DateSearchValue, modifier);
             break;
         case 'token':
-            typeQuery = tokenQuery(compiledSearchParam, searchValue, useKeywordSubFields, modifier);
+            typeQuery = tokenQuery(compiledSearchParam, searchValue as TokenSearchValue, useKeywordSubFields, modifier);
             break;
         case 'number':
-            typeQuery = numberQuery(compiledSearchParam, searchValue, modifier);
+            typeQuery = numberQuery(compiledSearchParam, searchValue as NumberSearchValue, modifier);
             break;
         case 'quantity':
-            typeQuery = quantityQuery(compiledSearchParam, searchValue, useKeywordSubFields, modifier);
+            typeQuery = quantityQuery(
+                compiledSearchParam,
+                searchValue as QuantitySearchValue,
+                useKeywordSubFields,
+                modifier,
+            );
             break;
         case 'reference':
             typeQuery = referenceQuery(
                 compiledSearchParam,
-                searchValue,
+                searchValue as ReferenceSearchValue,
                 useKeywordSubFields,
                 baseUrl,
                 searchParam.name,
@@ -54,12 +65,12 @@ function typeQueryWithConditions(
             );
             break;
         case 'uri':
-            typeQuery = uriQuery(compiledSearchParam, searchValue, useKeywordSubFields, modifier);
+            typeQuery = uriQuery(compiledSearchParam, searchValue as string, useKeywordSubFields, modifier);
             break;
         case 'composite':
         case 'special':
         default:
-            typeQuery = stringQuery(compiledSearchParam, searchValue, modifier);
+            typeQuery = stringQuery(compiledSearchParam, searchValue as string, modifier);
     }
     // In most cases conditions are used for fields that are an array of objects
     // Ideally we should be using a nested query, but that'd require to update the index mappings.
@@ -87,12 +98,12 @@ function typeQueryWithConditions(
 
 function searchParamQuery(
     searchParam: SearchParam,
-    searchValue: string,
+    splitSearchValue: unknown[],
     useKeywordSubFields: boolean,
     baseUrl: string,
     modifier?: string,
 ): any {
-    const splitSearchValue = getOrSearchValues(searchValue);
+    // const splitSearchValue = getOrSearchValues(searchValue);
     let queryList = [];
     for (let i = 0; i < splitSearchValue.length; i += 1) {
         queryList.push(
@@ -120,35 +131,6 @@ function searchParamQuery(
     };
 }
 
-function searchRequestQuery(
-    fhirSearchParametersRegistry: FHIRSearchParametersRegistry,
-    queryParams: any,
-    resourceType: string,
-    baseUrl: string,
-    useKeywordSubFields: boolean,
-): any[] {
-    return Object.entries(normalizeQueryParams(queryParams))
-        .filter(
-            ([searchParameter]) =>
-                !NON_SEARCHABLE_PARAMETERS.includes(searchParameter) && !isChainedParameter(searchParameter),
-        )
-        .flatMap(([searchParameter, searchValues]) => {
-            const searchModifier = parseSearchModifiers(searchParameter);
-            const fhirSearchParam = fhirSearchParametersRegistry.getSearchParameter(
-                resourceType,
-                searchModifier.parameterName,
-            );
-            if (fhirSearchParam === undefined) {
-                throw new InvalidSearchParameterError(
-                    `Invalid search parameter '${searchModifier.parameterName}' for resource type ${resourceType}`,
-                );
-            }
-            return searchValues.map((searchValue) =>
-                searchParamQuery(fhirSearchParam, searchValue, useKeywordSubFields, baseUrl, searchModifier.modifier),
-            );
-        });
-}
-
 // eslint-disable-next-line import/prefer-default-export
 export const buildQueryForAllSearchParameters = (
     fhirSearchParametersRegistry: FHIRSearchParametersRegistry,
@@ -157,21 +139,37 @@ export const buildQueryForAllSearchParameters = (
     additionalFilters: any[] = [],
     chainedParameterQuery: any = {},
 ): any => {
-    const esQuery = searchRequestQuery(
+    const parsedFhirQueryParams: ParsedFhirQueryParams = parseQuery(
         fhirSearchParametersRegistry,
-        request.queryParams,
         request.resourceType,
-        request.baseUrl,
-        useKeywordSubFields,
+        request.queryParams,
     );
-    if (!isEmpty(chainedParameterQuery)) {
-        const ESChainedParamQuery = searchRequestQuery(
-            fhirSearchParametersRegistry,
-            chainedParameterQuery,
-            request.resourceType,
-            request.baseUrl,
+
+    const esQuery = parsedFhirQueryParams.searchParams.map((queryParam) => {
+        return searchParamQuery(
+            queryParam.searchParam,
+            queryParam.parsedSearchValues,
             useKeywordSubFields,
+            request.baseUrl,
+            queryParam.modifier,
         );
+    });
+
+    if (!isEmpty(chainedParameterQuery)) {
+        const parsedFhirQueryForChainedParams: ParsedFhirQueryParams = parseQuery(
+            fhirSearchParametersRegistry,
+            request.resourceType,
+            chainedParameterQuery,
+        );
+        const ESChainedParamQuery = parsedFhirQueryForChainedParams.searchParams.map((queryParam) => {
+            return searchParamQuery(
+                queryParam.searchParam,
+                queryParam.parsedSearchValues,
+                useKeywordSubFields,
+                request.baseUrl,
+                queryParam.modifier,
+            );
+        });
         esQuery.push({
             bool: {
                 should: ESChainedParamQuery,
