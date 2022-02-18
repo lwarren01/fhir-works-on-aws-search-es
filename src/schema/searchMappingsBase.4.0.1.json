@@ -57,10 +57,6 @@
       "type": "Coding"
     },
     {
-      "field": "extension.valueReference",
-      "type": "Reference"
-    },
-    {
       "field": "extension.valueCodeableConcept",
       "type": "CodeableConcept"
     },
